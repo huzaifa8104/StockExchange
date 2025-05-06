@@ -312,6 +312,39 @@ void Trader::placeOrder() {
     cin >> newOrder.quantity;
     newOrder.username = currentUser->username;
 
+    if (newOrder.type == "SELL") {
+        int userId = -1;
+        {
+            const char* idSql = "SELECT id FROM Users WHERE username = ?;";
+            sqlite3_stmt* idStmt;
+            sqlite3_prepare_v2(db, idSql, -1, &idStmt, 0);
+            sqlite3_bind_text(idStmt, 1, currentUser->username.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(idStmt) == SQLITE_ROW) {
+                userId = sqlite3_column_int(idStmt, 0);
+            }
+            sqlite3_finalize(idStmt);
+        }
+        
+        int ownedQty = 0;
+        {
+            const char* qtySql = 
+                "SELECT quantity FROM Portfolios "
+                " WHERE user_id = ? AND stock_symbol = ?;";
+            sqlite3_stmt* qtyStmt;
+            sqlite3_prepare_v2(db, qtySql, -1, &qtyStmt, 0);
+            sqlite3_bind_int(qtyStmt, 1, userId);
+            sqlite3_bind_text(qtyStmt, 2, newOrder.symbol.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(qtyStmt) == SQLITE_ROW) {
+                ownedQty = sqlite3_column_int(qtyStmt, 0);
+            }
+            sqlite3_finalize(qtyStmt);
+        }
+        if (newOrder.quantity > ownedQty) {
+            showError("Insufficient shares to sell");
+            return;
+        }
+    }
+
     if (newOrder.type == "BUY" && currentUser->balance < newOrder.price * newOrder.quantity) {
         showError("Insufficient funds");
         return;
