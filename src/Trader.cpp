@@ -336,10 +336,37 @@ void Trader::placeOrder() {
             showError("Invalid order type. Please enter BUY or SELL");
         }
     } while (!validOrderType);
-    cout << "Price: ";
-    cin >> newOrder.price;
-    cout << "Quantity: ";
-    cin >> newOrder.quantity;
+
+    while (true) {
+        cout << "Price: ";
+        if (cin >> newOrder.price) {
+            if (newOrder.price > 0) {
+                break;
+            } else {
+                showError("Price must be positive");
+            }
+        } else {
+            showError("Invalid price. Please enter a number");
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        }
+    }
+    
+    while (true) {
+        cout << "Quantity: ";
+        if (cin >> newOrder.quantity) {
+            if (newOrder.quantity > 0) {
+                break;
+            } else {
+                showError("Quantity must be positive");
+            }
+        } else {
+            showError("Invalid quantity. Please enter a whole number");
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        }
+    }
+
     newOrder.username = currentUser->username;
 
     if (newOrder.type == "SELL") {
