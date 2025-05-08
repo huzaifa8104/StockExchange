@@ -304,6 +304,24 @@ void Trader::placeOrder() {
     Order newOrder;
     cout << "Enter symbol: ";
     cin >> newOrder.symbol;
+    
+    bool validSymbol = false;
+    {
+        const char* checkSql = "SELECT 1 FROM Stocks WHERE symbol = ?;";
+        sqlite3_stmt* checkStmt;
+        sqlite3_prepare_v2(db, checkSql, -1, &checkStmt, 0);
+        sqlite3_bind_text(checkStmt, 1, newOrder.symbol.c_str(), -1, SQLITE_STATIC);
+        if (sqlite3_step(checkStmt) == SQLITE_ROW) {
+            validSymbol = true;
+        }
+        sqlite3_finalize(checkStmt);
+    }
+    
+    if (!validSymbol) {
+        showError("Invalid stock symbol");
+        return;
+    }
+
     cout << "Type (BUY/SELL): ";
     cin >> newOrder.type;
     cout << "Price: ";
@@ -324,7 +342,6 @@ void Trader::placeOrder() {
             }
             sqlite3_finalize(idStmt);
         }
-        
         int ownedQty = 0;
         {
             const char* qtySql = 
