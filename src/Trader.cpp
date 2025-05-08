@@ -322,8 +322,20 @@ void Trader::placeOrder() {
         return;
     }
 
-    cout << "Type (BUY/SELL): ";
-    cin >> newOrder.type;
+    string orderType;
+    bool validOrderType = false;
+    do {
+        cout << "Type (BUY/SELL): ";
+        cin >> orderType;
+        transform(orderType.begin(), orderType.end(), orderType.begin(), ::toupper);
+        
+        if (orderType == "BUY" || orderType == "SELL") {
+            validOrderType = true;
+            newOrder.type = orderType;
+        } else {
+            showError("Invalid order type. Please enter BUY or SELL");
+        }
+    } while (!validOrderType);
     cout << "Price: ";
     cin >> newOrder.price;
     cout << "Quantity: ";
