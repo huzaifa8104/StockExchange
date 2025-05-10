@@ -9,6 +9,9 @@ This project implements a stock exchange simulation system using C++ and SQLite 
 - **Real-Time Updates:** Stock prices update with every trade.
 - **Portfolio Management:** Track holdings, account balance, and net worth.
 - **Transaction Logging:** Record deposits, withdrawals, and trades.
+- **Order Management**  
+  - View active user orders.  
+  - Cancel open orders by order ID.
 
 ## Prerequisites
 - **C++ Compiler:** e.g., g++ (MinGW recommended on Windows)
