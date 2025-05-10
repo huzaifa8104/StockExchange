@@ -1,23 +1,26 @@
 # Stock Exchange System
 
-## Overview
+## 🌟 Overview
 This project implements a stock exchange simulation system using C++ and SQLite for persistent data storage. It provides functionalities such as user registration, login, order placement, market price viewing, portfolio management, deposits, and withdrawals.
 
-## Features
-- **User Management:** Register and login securely.
-- **Trading Engine:** Place buy/sell orders with automatic matching.
-- **Real-Time Updates:** Stock prices update with every trade.
-- **Portfolio Management:** Track holdings, account balance, and net worth.
-- **Transaction Logging:** Record deposits, withdrawals, and trades.
-- **Order Management**  
+## 🚀 Features
+- **🔒 User Management:** Register and login securely.
+- **⚡ Trading Engine:** Place buy/sell orders with automatic matching.
+- **📈 Real-Time Updates:** Stock prices update with every trade.
+- **💼 Portfolio Management:** Track holdings, account balance, and net worth.
+- **📱 Transaction Logging:** Record deposits, withdrawals, and trades.
+- **📊 Order Management**  
   - View active user orders.  
   - Cancel open orders by order ID.
 
-## Prerequisites
+## 🏗 Project Structure
+![System Design](include/systemDesign.png) 
+
+## 🛠 Prerequisites
 - **C++ Compiler:** e.g., g++ (MinGW recommended on Windows)
 - **SQLite3 Library**
 
-## Setting Up SQLite with MinGW (Windows)
+## 🔧 Setting Up SQLite with MinGW (Windows)
 
 To avoid SQLite errors during compilation and runtime, follow these steps:
 
@@ -65,5 +68,5 @@ To avoid SQLite errors during compilation and runtime, follow these steps:
      .\StockExchange
      ```
 
-## License
+## 📜 License
 This project is licensed under the MIT License.
