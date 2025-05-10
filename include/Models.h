@@ -23,6 +23,7 @@ struct Transaction {
 };
 
 struct Order {
+    int id;
     string username;
     string symbol;
     double price;
