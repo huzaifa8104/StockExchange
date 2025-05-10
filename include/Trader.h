@@ -35,6 +35,8 @@ public:
     void checkPortfolio();
     void depositMoney();
     void withdrawMoney();
+    void viewUserOrders();
+    void cancelOrder(int orderId);
 };
 
 #endif 

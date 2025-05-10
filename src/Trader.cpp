@@ -103,20 +103,21 @@ void Trader::updateStockPrices() {
 }
 
 void Trader::loadOrdersFromDatabase() {
-    const char* sql = "SELECT Users.username, Orders.stock_symbol, Orders.price, "
-                      "Orders.quantity, Orders.type FROM Orders JOIN Users "
-                      "ON Orders.user_id = Users.id;";
+    const char* sql = "SELECT Orders.id, Users.username, Orders.stock_symbol, "
+                    "Orders.price, Orders.quantity, Orders.type FROM Orders "
+                    "JOIN Users ON Orders.user_id = Users.id WHERE Orders.quantity > 0;";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Order order;
-        order.username = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-        order.symbol = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        order.price = sqlite3_column_double(stmt, 2);
-        order.quantity = sqlite3_column_int(stmt, 3);
-        order.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
-
+        order.id = sqlite3_column_int(stmt, 0);
+        order.username = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        order.symbol = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        order.price = sqlite3_column_double(stmt, 3);
+        order.quantity = sqlite3_column_int(stmt, 4);
+        order.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+        
         if (order.type == "BUY") buyOrders.push_back(order);
         else sellOrders.push_back(order);
     }
@@ -150,8 +151,8 @@ void Trader::executeTrade(const string& buyer, const string& seller,
     sqlite3_finalize(stmt);
 
     sql = "UPDATE Portfolios SET quantity = quantity + ? "
-          "WHERE user_id = (SELECT id FROM Users WHERE username = ?) "
-          "AND stock_symbol = ?;";
+            "WHERE user_id = (SELECT id FROM Users WHERE username = ?) "
+            "AND stock_symbol = ?;";
     sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
     sqlite3_bind_int(stmt, 1, quantity);
     sqlite3_bind_text(stmt, 2, buyer.c_str(), -1, SQLITE_STATIC);
@@ -160,8 +161,8 @@ void Trader::executeTrade(const string& buyer, const string& seller,
     sqlite3_finalize(stmt);
 
     sql = "UPDATE Portfolios SET quantity = quantity - ? "
-          "WHERE user_id = (SELECT id FROM Users WHERE username = ?) "
-          "AND stock_symbol = ?;";
+            "WHERE user_id = (SELECT id FROM Users WHERE username = ?) "
+            "AND stock_symbol = ?;";
     sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
     sqlite3_bind_int(stmt, 1, quantity);
     sqlite3_bind_text(stmt, 2, seller.c_str(), -1, SQLITE_STATIC);
@@ -170,50 +171,118 @@ void Trader::executeTrade(const string& buyer, const string& seller,
     sqlite3_finalize(stmt);
 
     cout << "Trade executed: " << quantity << " shares of " << symbol
-         << " at $" << price << " each.\n";
+            << " at $" << price << " each.\n";
 }
 
 void Trader::matchOrders(Order& newOrder) {
-    if (newOrder.type == "BUY") {
-        for (auto it = sellOrders.begin(); it != sellOrders.end();) {
-            if (it->symbol == newOrder.symbol && it->price <= newOrder.price) {
-                int tradeQuantity = min(newOrder.quantity, it->quantity);
-                executeTrade(newOrder.username, it->username, newOrder.symbol, it->price, tradeQuantity);
+    sqlite3_int64 newOrderId = -1;
+    sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
 
-                newOrder.quantity -= tradeQuantity;
-                it->quantity -= tradeQuantity;
+    auto execute_sql = [&](const char* sql, auto&& binder) {
+        sqlite3_stmt* stmt;
+        if(sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK) return false;
+        binder(stmt);
+        bool result = sqlite3_step(stmt) == SQLITE_DONE;
+        sqlite3_finalize(stmt);
+        return result;
+    };
 
-                if (it->quantity == 0) it = sellOrders.erase(it);
-                else ++it;
-
-                if (newOrder.quantity == 0) break;
-            } else {
-                ++it;
-            }
-        }
-        if (newOrder.quantity > 0) buyOrders.push_back(newOrder);
-    } else { 
-        for (auto it = buyOrders.begin(); it != buyOrders.end();) {
-            if (it->symbol == newOrder.symbol && it->price >= newOrder.price) {
-                int tradeQuantity = min(newOrder.quantity, it->quantity);
-                executeTrade(it->username, newOrder.username, newOrder.symbol, it->price, tradeQuantity);
-
-                newOrder.quantity -= tradeQuantity;
-                it->quantity -= tradeQuantity;
-
-                if (it->quantity == 0) it = buyOrders.erase(it);
-                else ++it;
-
-                if (newOrder.quantity == 0) break;
-            } else {
-                ++it;
-            }
-        }
-        if (newOrder.quantity > 0) sellOrders.push_back(newOrder);
+    if(newOrder.quantity > 0) {
+        const char* insertSql = "INSERT INTO Orders (user_id, stock_symbol, price, quantity, type) "
+                        "VALUES ((SELECT id FROM Users WHERE username = ?), ?, ?, ?, ?);";
+        execute_sql(insertSql, [&](sqlite3_stmt* stmt) {
+            sqlite3_bind_text(stmt, 1, newOrder.username.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, newOrder.symbol.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_double(stmt, 3, newOrder.price);
+            sqlite3_bind_int(stmt, 4, newOrder.quantity);
+            sqlite3_bind_text(stmt, 5, newOrder.type.c_str(), -1, SQLITE_STATIC);
+        });
+        newOrderId = sqlite3_last_insert_rowid(db);
+        newOrder.id = newOrderId;
     }
 
+    auto processOrders = [&](auto& orders, const char* orderType, auto&& tradeExecutor) {
+        for(auto it = orders.begin(); it != orders.end();) {
+            if(it->symbol == newOrder.symbol && 
+            ((newOrder.type == "BUY" && it->price <= newOrder.price) ||
+            (newOrder.type == "SELL" && it->price >= newOrder.price))) {
+                
+                int tradeQty = min(newOrder.quantity, it->quantity);
+                if(tradeQty <= 0) {
+                    ++it;
+                    continue;
+                }
+
+                tradeExecutor(*it, tradeQty);
+                newOrder.quantity -= tradeQty;
+                it->quantity -= tradeQty;
+
+                if(it->quantity <= 0) {
+                    const char* deleteSql = "DELETE FROM Orders WHERE rowid = ("
+                        "SELECT rowid FROM Orders WHERE user_id = "
+                        "(SELECT id FROM Users WHERE username = ?) "
+                        "AND stock_symbol = ? AND price = ? AND type = ? LIMIT 1);";
+                    
+                    execute_sql(deleteSql, [&](sqlite3_stmt* stmt) {
+                        sqlite3_bind_text(stmt, 1, it->username.c_str(), -1, SQLITE_STATIC);
+                        sqlite3_bind_text(stmt, 2, it->symbol.c_str(), -1, SQLITE_STATIC);
+                        sqlite3_bind_double(stmt, 3, it->price);
+                        sqlite3_bind_text(stmt, 4, orderType, -1, SQLITE_STATIC);
+                    });
+                    
+                    it = orders.erase(it);
+                } else {
+                    const char* updateSql = "UPDATE Orders SET quantity = ? WHERE rowid = ("
+                        "SELECT rowid FROM Orders WHERE user_id = "
+                        "(SELECT id FROM Users WHERE username = ?) "
+                        "AND stock_symbol = ? AND price = ? AND type = ? LIMIT 1);";
+                    
+                    execute_sql(updateSql, [&](sqlite3_stmt* stmt) {
+                        sqlite3_bind_int(stmt, 1, it->quantity);
+                        sqlite3_bind_text(stmt, 2, it->username.c_str(), -1, SQLITE_STATIC);
+                        sqlite3_bind_text(stmt, 3, it->symbol.c_str(), -1, SQLITE_STATIC);
+                        sqlite3_bind_double(stmt, 4, it->price);
+                        sqlite3_bind_text(stmt, 5, orderType, -1, SQLITE_STATIC);
+                    });
+                    ++it;
+                }
+            } else {
+                ++it;
+            }
+        }
+    };
+
+    if(newOrder.type == "BUY") {
+        processOrders(sellOrders, "SELL", [&](Order& sellOrder, int qty) {
+            executeTrade(newOrder.username, sellOrder.username, 
+                        newOrder.symbol, sellOrder.price, qty);
+        });
+        if(newOrder.quantity > 0) buyOrders.push_back(newOrder);
+    } else {
+        processOrders(buyOrders, "BUY", [&](Order& buyOrder, int qty) {
+            executeTrade(buyOrder.username, newOrder.username, 
+                        newOrder.symbol, newOrder.price, qty);
+        });
+        if(newOrder.quantity > 0) sellOrders.push_back(newOrder);
+    }
+
+    if(newOrderId != -1) {
+        if(newOrder.quantity <= 0) {
+            execute_sql("DELETE FROM Orders WHERE rowid = ?;", [&](sqlite3_stmt* stmt) {
+                sqlite3_bind_int64(stmt, 1, newOrderId);
+            });
+        } else {
+            execute_sql("UPDATE Orders SET quantity = ? WHERE rowid = ?;", [&](sqlite3_stmt* stmt) {
+                sqlite3_bind_int(stmt, 1, newOrder.quantity);
+                sqlite3_bind_int64(stmt, 2, newOrderId);
+            });
+        }
+    }
+
+    sqlite3_exec(db, "COMMIT;", 0, 0, 0);
+
     cout << "\nUpdated Market Prices:\n";
-    for (const auto& [sym, price] : stockPrices) {
+    for(const auto& [sym, price] : stockPrices) {
         cout << sym << ": $" << price << "\n";
     }
 }
@@ -545,4 +614,72 @@ void Trader::withdrawMoney() {
         showError("Withdrawal failed");
     }
     sqlite3_finalize(stmt);
+}
+
+void Trader::viewUserOrders() {
+    if (!currentUser) {
+        showError("No user logged in");
+        return;
+    }
+
+    vector<Order> userOrders;
+    for (const auto& order : buyOrders) {
+        if (order.username == currentUser->username) userOrders.push_back(order);
+    }
+    for (const auto& order : sellOrders) {
+        if (order.username == currentUser->username) userOrders.push_back(order);
+    }
+
+    if (userOrders.empty()) {
+        cout << "No active orders.\n";
+        return;
+    }
+
+    cout << "\nYour Active Orders:\n";
+    cout << "--------------------------------------------------\n";
+    cout << left << setw(8) << "ID" << setw(8) << "Type" << setw(8) << "Symbol"
+         << setw(12) << "Price" << setw(10) << "Quantity" << "\n";
+    for (const auto& order : userOrders) {
+        cout << setw(8) << order.id 
+             << setw(8) << order.type 
+             << setw(8) << order.symbol
+             << "$" << setw(11) << fixed << setprecision(2) << order.price
+             << setw(10) << order.quantity << "\n";
+    }
+    cout << "--------------------------------------------------\n";
+}
+
+void Trader::cancelOrder(int orderId) {
+    if (!currentUser) {
+        showError("No user logged in");
+        return;
+    }
+
+    auto cancelOrderInVector = [&](auto& orders, const string& type) {
+        for (auto it = orders.begin(); it != orders.end(); ++it) {
+            if (it->id == orderId && it->username == currentUser->username) {
+                const char* sql = "DELETE FROM Orders WHERE id = ? AND user_id = "
+                                "(SELECT id FROM Users WHERE username = ?);";
+                sqlite3_stmt* stmt;
+                sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+                sqlite3_bind_int(stmt, 1, orderId);
+                sqlite3_bind_text(stmt, 2, currentUser->username.c_str(), -1, SQLITE_STATIC);
+                
+                if (sqlite3_step(stmt) == SQLITE_DONE) {
+                    orders.erase(it);
+                    cout << type << " order #" << orderId << " cancelled successfully.\n";
+                } else {
+                    showError("Failed to cancel order");
+                }
+                sqlite3_finalize(stmt);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (!cancelOrderInVector(buyOrders, "Buy") && 
+        !cancelOrderInVector(sellOrders, "Sell")) {
+        showError("Order not found or not owned by you");
+    }
 }
